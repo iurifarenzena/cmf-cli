@@ -24,12 +24,18 @@ namespace Cmf.CLI.Core.Objects
         public List<Uri> Repositories { get; set; }
 
         /// <summary>
+        /// Use CIFSClient instead of direct copy
+        /// </summary>
+        public bool EnableCIFSClient { get; set; }
+
+        /// <summary>
         /// Initialize new RepositoriesConfig.
         /// This constructor is only used as fallback, if a config is found in the filesystem, the file will be deserialized into this object
         /// </summary>
         public RepositoriesConfig()
         {
             Repositories = new List<Uri>();
+            EnableCIFSClient = false;
         }
     }
 

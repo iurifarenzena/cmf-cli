@@ -1,6 +1,12 @@
+using Cmf.CLI.Core.Interfaces;
 using Cmf.CLI.Utilities;
+using Core.Objects;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.TemplateEngine.Utils;
+using System;
+using System.Collections.Generic;
 using System.IO.Abstractions;
+using System.Linq;
 
 namespace Cmf.CLI.Core.Objects
 {
@@ -75,6 +81,8 @@ namespace Cmf.CLI.Core.Objects
         /// </summary>
         public static RelatedPackageCollection RelatedPackagesCache { get; set; }
 
+        public List<ICIFSClient> CIFSClients { get; set; }
+
         private ExecutionContext(IFileSystem fileSystem)
         {
             // private constructor, can only obtain instance via the Instance property
@@ -87,6 +95,13 @@ namespace Cmf.CLI.Core.Objects
                 {
                     this.ProjectConfig = pcs.Load(fileSystem);
                 }
+            }
+
+            // connect and load shares for all UNC repositories
+            if(RepositoriesConfig.EnableCIFSClient && RepositoriesConfig.Repositories.HasAny())
+            {
+                CIFSClients = new();
+                RepositoriesConfig?.Repositories?.Where(r=> r.IsUnc).GroupBy(r => r.Host).ForEach(r=> CIFSClients.Add(new CIFSClient(r.Key, r)));
             }
 
             RelatedPackagesCache = new();

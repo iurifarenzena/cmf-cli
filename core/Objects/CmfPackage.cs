@@ -11,9 +11,10 @@ using System.IO;
 using System.IO.Abstractions;
 using System.IO.Compression;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Core.Objects;
+using Cmf.CLI.Core.Interfaces;
 
 namespace Cmf.CLI.Core.Objects
 {
@@ -277,6 +278,12 @@ namespace Cmf.CLI.Core.Objects
         /// </value>
         [JsonProperty(Order = 23)]
         public string DependenciesDirectory { get; set; }
+
+        /// <summary>
+        /// Loaded SharedFolder when loading from cifs
+        /// </summary>
+        [JsonIgnore]
+        public ISharedFolder SharedFolder { get; private set; }
 
         #endregion Public Properties
 
@@ -543,7 +550,7 @@ namespace Cmf.CLI.Core.Objects
                 var missingRepoDirectories = repoDirectories?.Where(r => r.Exists == false).ToArray();
                 if (missingRepoDirectories.HasAny())
                 {
-                    throw new CliException($"Some of the provided repositories do not exist: {string.Join(", ", missingRepoDirectories.Select(d => d.FullName))}");
+                    Log.Warning($"Some of the provided repositories do not exist: {string.Join(", ", missingRepoDirectories.Select(d => d.FullName))}");
                 }
                 foreach (var dependency in this.Dependencies)
                 {
@@ -557,7 +564,9 @@ namespace Cmf.CLI.Core.Objects
                     // 2) check if package is in repository
                     if (dependencyPackage == null)
                     {
-                        dependencyPackage = LoadFromRepo(repoDirectories, dependency.Id, dependency.Version);
+                        dependencyPackage = ExecutionContext.Instance.RepositoriesConfig.EnableCIFSClient
+                            ? LoadFromCIFSShare(dependency.Id, dependency.Version)
+                            : LoadFromRepo(repoDirectories, dependency.Id, dependency.Version);
                     }
 
                     // 3) search in the source code repository (only if this is a local package)
@@ -741,6 +750,53 @@ namespace Cmf.CLI.Core.Objects
             }
 
             return cmfPackage;
+        }
+
+        /// <summary>
+        /// Load CmfPackage from a CIFS Share
+        /// </summary>
+        /// <param name="packageId"></param>
+        /// <param name="version"></param>
+        /// <returns></returns>
+        /// <exception cref="ArgumentNullException"></exception>
+        public static CmfPackage LoadFromCIFSShare(string packageId, string version)
+        {
+            if (version is null)
+            {
+                throw new ArgumentNullException(nameof(version));
+            }
+
+            CmfPackage cmfPackage = null;
+            string _dependencyFileName = $"{packageId}.{version}.zip";
+
+            foreach(CIFSClient client in ExecutionContext.Instance.CIFSClients.Where(c=> c.IsConnected))
+            {
+                foreach (var share in client.SharedFolders.Where(sf => sf.Exists))
+                {
+                    var file = share.GetFile(_dependencyFileName);
+                    if(file != null)
+                    {
+                        using (ZipArchive zip = new(file.Item2, ZipArchiveMode.Read))
+                        {
+                            var manifest = zip.GetEntry(CoreConstants.DeploymentFrameworkManifestFileName);
+                            if (manifest != null)
+                            {
+                                using var stream = manifest.Open();
+                                using var reader = new StreamReader(stream);
+                                cmfPackage = FromManifest(reader.ReadToEnd(), setDefaultValues: true);
+                                if (cmfPackage != null)
+                                {   
+                                    cmfPackage.Uri = file.Item1;
+                                    cmfPackage.SharedFolder = share;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return cmfPackage;          
         }
 
         /// <summary>
